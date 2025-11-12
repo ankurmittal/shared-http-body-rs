@@ -1,8 +1,5 @@
-#[cfg(test)]
-mod tests {
+mod clonable_frame;
+mod inner;
+mod shared_body;
 
-    #[test]
-    fn demo() {
-        println!("this works");
-    }
-}
+pub use crate::shared_body::SharedBody;
