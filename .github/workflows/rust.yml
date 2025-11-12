@@ -1,0 +1,67 @@
+name: Rust
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+    - name: Build
+      run: cargo build --verbose
+    - name: Run tests
+      run: cargo test --verbose
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+    - name: Run Clippy
+      run: cargo clippy --all-targets --all-features -- -D warnings
+
+  coverage:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+    - name: Cache tarpaulin
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/bin/cargo-tarpaulin
+        key: ${{ runner.os }}-tarpaulin-${{ env.TARPAULIN_VERSION }}
+        restore-keys: |
+          ${{ runner.os }}-tarpaulin-
+      env:
+        TARPAULIN_VERSION: '0.34.1'
+    - name: Install tarpaulin
+      run: |
+        if ! command -v cargo-tarpaulin &> /dev/null; then
+          echo "Installing cargo-tarpaulin..."
+          cargo install cargo-tarpaulin --version ${{ env.TARPAULIN_VERSION }}
+        else
+          echo "cargo-tarpaulin already installed"
+        fi
+      env:
+        TARPAULIN_VERSION: '0.34.1'
+    - name: Generate code coverage
+      run: cargo tarpaulin --verbose --all-features --workspace --timeout 120 --out xml --output-dir ./coverage/ --exclude-files 'benches/*'
+    - name: Upload to codecov.io
+      uses: codecov/codecov-action@v4
+      with:
+        file: ./coverage/cobertura.xml
+        fail_ci_if_error: true
+    - name: Archive code coverage results
+      uses: actions/upload-artifact@v4
+      with:
+        name: code-coverage-report
+        path: ./coverage/

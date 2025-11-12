@@ -1,0 +1,12 @@
+[package]
+name = "shared_http_body"
+version = "0.0.1"
+edition = "2021"
+authors = ["Ankur Mittal"]
+license = "Apache-2.0"
+description = "A library for creating shareable http body that can be cloned and consumed by multiple consumers"
+readme = "README.md"
+repository = "https://github.com/ankurmittal/shared-http-body-rs"
+keywords = ["http", "async", "clone", "shared", "body"]
+categories = ["asynchronous", "data-structures"]
+exclude = ["target/", ".git/", ".gitignore"]

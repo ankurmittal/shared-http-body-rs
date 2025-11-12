@@ -1,0 +1,1 @@
+A Rust library for creating shareable http body that can be cloned and consumed by multiple tasks.
