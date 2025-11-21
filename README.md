@@ -14,7 +14,7 @@ A Rust library for creating shareable HTTP bodies that can be cloned and consume
 ## Quick Example
 
 ```rust
-use shared_http_body::SharedBody;
+use shared_http_body::SharedBodyExt;
 use http_body_util::{BodyExt, StreamBody};
 use http_body::Frame;
 use bytes::Bytes;
@@ -29,7 +29,8 @@ async fn main() {
             .map(|s| Ok::<_, std::convert::Infallible>(Frame::data(Bytes::from(s))))
     );
     let body = StreamBody::new(stream);
-    let shared_body = SharedBody::new(body);
+    
+    let shared_body = body.into_shared();
 
     // Clone the body for multiple consumers
     let consumer1 = shared_body.clone();
@@ -54,6 +55,7 @@ async fn main() {
 - **Efficient sharing**: Frames are cloned only when consumed by each clone
 - **Works with any `Unpin` body**: Compatible with most HTTP body types
 - **Preserves HTTP semantics**: Maintains `size_hint()` and `is_end_stream()` behavior
+- **Convenient extension trait**: Use `.into_shared()` on any body via `SharedBodyExt`
 
 ## Use Cases
 
