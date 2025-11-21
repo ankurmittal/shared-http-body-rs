@@ -122,10 +122,12 @@
 //!
 
 mod clonable_frame;
+mod ext;
 mod inner;
 mod shared_body;
 
 pub use crate::shared_body::SharedBody;
+pub use ext::SharedBodyExt;
 
 #[cfg(doc)]
 use http_body::Body;
