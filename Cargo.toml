@@ -1,6 +1,6 @@
 [package]
 name = "shared_http_body"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
 authors = ["Ankur Mittal"]
 license = "Apache-2.0"
@@ -10,3 +10,14 @@ repository = "https://github.com/ankurmittal/shared-http-body-rs"
 keywords = ["http", "async", "clone", "shared", "body"]
 categories = ["asynchronous", "data-structures"]
 exclude = ["target/", ".git/", ".gitignore"]
+
+[dependencies]
+futures-util = "0.3.31"
+http-body = "1.0.1"
+
+[dev-dependencies]
+tokio = { version = "1.47", features = ["rt", "macros", "rt-multi-thread"] }
+tokio-test = "0.4"
+static_assertions = "1.1"
+http-body-util = "0.1"
+bytes = "1.9"
