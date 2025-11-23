@@ -1,0 +1,2 @@
+[alias]
+all-tests = "test --all-features"

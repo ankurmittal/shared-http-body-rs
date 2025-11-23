@@ -121,6 +121,8 @@
 //! - **Request/Response Logging**: Clone the body to log it while still forwarding to the handler
 //!
 
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
 mod clonable_frame;
 mod ext;
 mod inner;
@@ -128,6 +130,10 @@ mod shared_body;
 
 pub use crate::shared_body::SharedBody;
 pub use ext::SharedBodyExt;
+
+#[cfg_attr(docsrs, doc(cfg(feature = "stats")))]
+#[cfg(feature = "stats")]
+pub mod stats;
 
 #[cfg(doc)]
 use http_body::Body;

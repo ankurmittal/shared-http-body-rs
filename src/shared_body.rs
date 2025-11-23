@@ -93,6 +93,8 @@ where
     future: Option<Shared<InnerFuture<B>>>,
     is_end_stream: IsEndStream,
     size_hint: SizeHint,
+    #[cfg(feature = "stats")]
+    stats: crate::stats::Stats,
 }
 
 impl<B> Clone for SharedBody<B>
@@ -102,11 +104,20 @@ where
     B::Error: Clone,
 {
     fn clone(&self) -> Self {
-        Self {
+        let s = Self {
             future: self.future.clone(),
             is_end_stream: self.is_end_stream,
             size_hint: self.size_hint.clone(),
+            #[cfg(feature = "stats")]
+            stats: self.stats.clone(),
+        };
+
+        #[cfg(feature = "stats")]
+        if self.future.is_some() {
+            s.stats.increment();
         }
+
+        s
     }
 }
 
@@ -144,11 +155,55 @@ where
         let size_hint = body.size_hint();
         let is_end = body.is_end_stream();
 
-        Self {
+        let s = Self {
             future: InnerFuture::new(body).shared().into(),
             is_end_stream: is_end,
             size_hint,
-        }
+            #[cfg(feature = "stats")]
+            stats: crate::stats::Stats::new(),
+        };
+
+        #[cfg(feature = "stats")]
+        s.stats.increment();
+
+        s
+    }
+
+    /// Returns the number of active clones of this body, including the current instance.
+    ///
+    /// This method allows you to track how many shared consumers exist for the body.
+    /// The count includes the current instance, so a value of 1 means there are no clones.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use shared_http_body::SharedBody;
+    /// use http_body_util::StreamBody;
+    /// use http_body::Frame;
+    /// use bytes::Bytes;
+    /// use futures_util::stream;
+    ///
+    /// let chunks = vec!["test"];
+    /// let stream = stream::iter(chunks.into_iter().map(|s| Ok::<_, std::convert::Infallible>(Frame::data(Bytes::from(s)))));
+    /// let body = StreamBody::new(stream);
+    /// let shared = SharedBody::new(body);
+    /// let stats = shared.stats();
+    /// assert_eq!(stats.active_clones(), 1); // No clones yet
+    ///
+    /// let clone1 = shared.clone();
+    /// assert_eq!(stats.active_clones(), 2); // Original + 1 clone
+    ///
+    /// let clone2 = shared.clone();
+    /// assert_eq!(stats.active_clones(), 3); // Original + 2 clones
+    ///
+    /// drop(clone1);
+    /// assert_eq!(stats.active_clones(), 2); // Original + 1 clone remaining
+    /// ```
+    ///
+    #[cfg(feature = "stats")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "stats")))]
+    pub fn stats(&self) -> crate::stats::Stats {
+        self.stats.clone()
     }
 }
 
@@ -182,6 +237,10 @@ where
             None => {
                 self.future.take();
                 self.is_end_stream = true;
+                #[cfg(feature = "stats")]
+                {
+                    self.stats.decrement();
+                }
                 Poll::Ready(None)
             }
         }
@@ -196,6 +255,23 @@ where
     }
 }
 
+impl<B> Drop for SharedBody<B>
+where
+    B: http_body::Body + Unpin,
+    B::Data: Clone,
+    B::Error: Clone,
+{
+    fn drop(&mut self) {
+        // Decrement active-clone count when this handle is dropped.
+        if self.future.is_some() {
+            #[cfg(feature = "stats")]
+            {
+                self.stats.decrement();
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -204,6 +280,13 @@ mod tests {
     use http_body::Body;
     use http_body::Frame;
     use http_body_util::{BodyExt, StreamBody};
+
+    type TestBody = SharedBody<
+        StreamBody<
+            stream::Iter<std::vec::IntoIter<Result<Frame<Bytes>, std::convert::Infallible>>>,
+        >,
+    >;
+    static_assertions::assert_impl_all!(TestBody: Send, Sync);
 
     // Helper function to create a test body from a vector of byte chunks
     fn create_test_body(
@@ -361,25 +444,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_send_sync_bounds() {
-        // Compile-time verification that SharedBody is Send + Sync
-        fn assert_send<T: Send>() {}
-        fn assert_sync<T: Sync>() {}
-
-        type TestBody = SharedBody<
-            StreamBody<
-                stream::Iter<std::vec::IntoIter<Result<Frame<Bytes>, std::convert::Infallible>>>,
-            >,
-        >;
-
-        assert_send::<TestBody>();
-        assert_sync::<TestBody>();
-
-        // Also verify using static_assertions
-        static_assertions::assert_impl_all!(TestBody: Send, Sync);
-    }
-
     #[tokio::test]
     async fn test_cross_thread_sharing() {
         use std::sync::Arc;
@@ -440,9 +504,7 @@ mod tests {
         let shared_body = SharedBody::new(body);
 
         // Size hint should be available (though exact values depend on StreamBody implementation)
-        let hint = shared_body.size_hint();
-        let _lower = hint.lower();
-        let _upper = hint.upper();
+        let _hint = shared_body.size_hint();
 
         // Just verify we can call it without panicking
         let clone = shared_body.clone();
@@ -550,5 +612,92 @@ mod tests {
         let result = shared_body.collect().await.unwrap().to_bytes();
 
         assert_eq!(result, Bytes::from("test1test2"));
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "stats")]
+    async fn test_stats() {
+        use bytes::Bytes;
+        use futures_util::stream;
+        use http_body::Frame;
+        use http_body_util::{BodyExt, StreamBody};
+
+        // 1) Creation with non-empty body
+        let chunks = vec!["frame1", "frame2", "frame3"];
+        let stream = stream::iter(
+            chunks
+                .into_iter()
+                .map(|s| Ok::<_, std::convert::Infallible>(Frame::data(Bytes::from(s)))),
+        );
+        let body = StreamBody::new(stream);
+        let shared = SharedBody::new(body);
+        let stats = shared.stats();
+
+        assert_eq!(stats.active_clones(), 1);
+
+        // clone increments
+        let clone1 = shared.clone();
+        assert_eq!(stats.active_clones(), 2);
+
+        // clone of clone increments
+        let clone2 = clone1.clone();
+        assert_eq!(stats.active_clones(), 3);
+
+        // dropping a clone decrements
+        drop(clone2);
+        assert_eq!(stats.active_clones(), 2);
+
+        // exhausting the original handle decrements its contribution
+        let _orig_collected = shared.collect().await.unwrap().to_bytes();
+
+        // only clone1 remains
+        assert_eq!(stats.active_clones(), 1);
+
+        // dropping the last active clone brings the count to zero
+        drop(clone1);
+        assert_eq!(stats.active_clones(), 0);
+
+        // empty-body case: wrapper is counted until polled/exhausted
+        let empty_stream =
+            stream::iter(Vec::<Result<Frame<Bytes>, std::convert::Infallible>>::new());
+        let shared_empty = SharedBody::new(StreamBody::new(empty_stream));
+        let stats_empty = shared_empty.stats();
+
+        // The body wrapper exists and hasn't been polled yet, so it's counted.
+        assert_eq!(stats_empty.active_clones(), 1);
+
+        let clone_empty = shared_empty.clone();
+        assert_eq!(stats_empty.active_clones(), 2);
+        drop(clone_empty);
+        assert_eq!(stats_empty.active_clones(), 1);
+
+        // exhausting the wrapper clears the count
+        let _ = shared_empty.collect().await.unwrap().to_bytes();
+        assert_eq!(stats_empty.active_clones(), 0);
+
+        // cloning after partial consumption
+        let chunks2 = vec!["data1", "data2", "data3"];
+        let stream2 = stream::iter(
+            chunks2
+                .into_iter()
+                .map(|s| Ok::<_, std::convert::Infallible>(Frame::data(Bytes::from(s)))),
+        );
+        let body2 = StreamBody::new(stream2);
+        let mut shared2 = SharedBody::new(body2);
+        let stats2 = shared2.stats();
+        assert_eq!(stats2.active_clones(), 1);
+
+        // consume one frame
+        let first = http_body_util::BodyExt::frame(&mut shared2).await;
+        assert!(first.is_some());
+
+        let clone_after = shared2.clone();
+        assert_eq!(stats2.active_clones(), 2);
+
+        drop(clone_after);
+        assert_eq!(stats2.active_clones(), 1);
+
+        let _ = shared2.collect().await.unwrap().to_bytes();
+        assert_eq!(stats2.active_clones(), 0);
     }
 }
