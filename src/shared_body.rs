@@ -205,6 +205,13 @@ mod tests {
     use http_body::Frame;
     use http_body_util::{BodyExt, StreamBody};
 
+    type TestBody = SharedBody<
+        StreamBody<
+            stream::Iter<std::vec::IntoIter<Result<Frame<Bytes>, std::convert::Infallible>>>,
+        >,
+    >;
+    static_assertions::assert_impl_all!(TestBody: Send, Sync);
+
     // Helper function to create a test body from a vector of byte chunks
     fn create_test_body(
         chunks: Vec<&'static str>,
@@ -361,25 +368,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_send_sync_bounds() {
-        // Compile-time verification that SharedBody is Send + Sync
-        fn assert_send<T: Send>() {}
-        fn assert_sync<T: Sync>() {}
-
-        type TestBody = SharedBody<
-            StreamBody<
-                stream::Iter<std::vec::IntoIter<Result<Frame<Bytes>, std::convert::Infallible>>>,
-            >,
-        >;
-
-        assert_send::<TestBody>();
-        assert_sync::<TestBody>();
-
-        // Also verify using static_assertions
-        static_assertions::assert_impl_all!(TestBody: Send, Sync);
-    }
-
     #[tokio::test]
     async fn test_cross_thread_sharing() {
         use std::sync::Arc;
@@ -440,9 +428,7 @@ mod tests {
         let shared_body = SharedBody::new(body);
 
         // Size hint should be available (though exact values depend on StreamBody implementation)
-        let hint = shared_body.size_hint();
-        let _lower = hint.lower();
-        let _upper = hint.upper();
+        let _hint = shared_body.size_hint();
 
         // Just verify we can call it without panicking
         let clone = shared_body.clone();
