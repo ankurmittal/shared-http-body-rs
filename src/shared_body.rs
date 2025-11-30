@@ -255,6 +255,7 @@ where
     }
 }
 
+#[cfg(feature = "stats")]
 impl<B> Drop for SharedBody<B>
 where
     B: http_body::Body + Unpin,
@@ -264,10 +265,7 @@ where
     fn drop(&mut self) {
         // Decrement active-clone count when this handle is dropped.
         if self.future.is_some() {
-            #[cfg(feature = "stats")]
-            {
-                self.stats.decrement();
-            }
+            self.stats.decrement();
         }
     }
 }
