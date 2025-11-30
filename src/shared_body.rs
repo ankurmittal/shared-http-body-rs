@@ -155,18 +155,13 @@ where
         let size_hint = body.size_hint();
         let is_end = body.is_end_stream();
 
-        let s = Self {
+        Self {
             future: InnerFuture::new(body).shared().into(),
             is_end_stream: is_end,
             size_hint,
             #[cfg(feature = "stats")]
             stats: crate::stats::Stats::new(),
-        };
-
-        #[cfg(feature = "stats")]
-        s.stats.increment();
-
-        s
+        }
     }
 
     /// Returns the number of active clones of this body, including the current instance.

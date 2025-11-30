@@ -18,7 +18,7 @@ impl Stats {
     // Create a new, empty stats instance.
     pub(crate) fn new() -> Self {
         Self {
-            active_clones: Arc::new(AtomicU64::new(0)),
+            active_clones: Arc::new(AtomicU64::new(1)),
         }
     }
 
