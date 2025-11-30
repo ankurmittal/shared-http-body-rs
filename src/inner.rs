@@ -7,66 +7,13 @@ use std::task::{ready, Context, Poll};
 
 use crate::clonable_frame::ClonableFrame;
 
-/// A future that polls an HTTP body once to retrieve the next frame.
-///
-/// This is a low-level primitive used by [`InnerFuture`]. It wraps a body and
-/// polls it exactly once, returning both the frame (if any) and the body itself.
-/// This allows the body to be reused for subsequent polls.
-///
-/// # Design Rationale
-///
-/// We need to poll the body, get a frame, but also retain ownership of the body
-/// for the next poll. This future accomplishes that by taking ownership of the body,
-/// polling it once, and then returning both the result and the body back to the caller.
-///
-/// # Panics
-///
-/// Polling this future more than once will panic with "polling BodyFuture twice".
-/// This is by design - each `BodyFuture` should only be polled once, after which
-/// a new `BodyFuture` should be created with the returned body.
-#[derive(Debug)]
-#[must_use = "futures do nothing unless you `.await` or poll them"]
-struct BodyFuture<B> {
-    inner: Option<B>,
-}
-
-impl<B> Future for BodyFuture<B>
-where
-    B: http_body::Body + Unpin,
-    B::Data: Clone,
-    B::Error: Clone,
-{
-    type Output = (Option<Result<ClonableFrame<B::Data>, B::Error>>, B);
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let item = {
-            let b = self.inner.as_mut().expect("polling BodyFuture twice");
-            ready!(Pin::new(b).poll_frame(cx))
-        };
-        let body = self.inner.take().unwrap();
-        Poll::Ready((item.map(|r| r.map(ClonableFrame::new)), body))
-    }
-}
-
-impl<B> BodyFuture<B>
-where
-    B: http_body::Body + Unpin,
-    B::Data: Clone,
-    B::Error: Clone,
-{
-    fn new(body: B) -> Self {
-        Self { inner: body.into() }
-    }
-}
-
 pub(crate) type IsEndStream = bool;
 
 /// Internal future wrapper that enables sharing of body state across multiple consumers.
 ///
-/// This is the core mechanism that makes `SharedBody` work. It wraps a [`BodyFuture`]
-/// and implements the below pattern:
+/// This is the core mechanism that makes `SharedBody` work. It implements the below pattern:
 ///
-/// 1. When polled, it polls the underlying `BodyFuture` to get the next frame
+/// 1. When polled, it polls the underlying body to get the next frame
 /// 2. It extracts HTTP metadata (`is_end_stream`, `size_hint`) from the body
 /// 3. It creates a **new** `InnerFuture` with the body and wraps it in `Shared`
 /// 4. It returns the frame, the new shared future, and the metadata
@@ -92,7 +39,7 @@ pub(crate) type IsEndStream = bool;
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub(crate) struct InnerFuture<B> {
-    inner: Option<BodyFuture<B>>,
+    inner: Option<B>,
 }
 
 impl<B> InnerFuture<B>
@@ -103,9 +50,7 @@ where
 {
     /// Creates a new `InnerFuture` from the given body.
     pub(crate) fn new(body: B) -> Self {
-        InnerFuture {
-            inner: Some(BodyFuture::new(body)),
-        }
+        InnerFuture { inner: Some(body) }
     }
 }
 
@@ -123,21 +68,27 @@ where
     )>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let inner_future = match self.inner.as_mut() {
-            Some(f) => Pin::new(f),
+        let body = match self.inner.as_mut() {
+            Some(b) => Pin::new(b),
             None => return Poll::Ready(None),
         };
 
-        match inner_future.poll(cx) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready((Some(item), body)) => {
+        let item = ready!(body.poll_frame(cx));
+
+        match item {
+            Some(item) => {
+                let body = self.inner.take().unwrap();
                 let is_end_stream = body.is_end_stream();
                 let size_hint = body.size_hint();
                 let next_shared_future = InnerFuture::new(body).shared();
-                self.inner.take();
-                Poll::Ready(Some((item, next_shared_future, is_end_stream, size_hint)))
+                Poll::Ready(Some((
+                    item.map(ClonableFrame::new),
+                    next_shared_future,
+                    is_end_stream,
+                    size_hint,
+                )))
             }
-            Poll::Ready((None, _body)) => {
+            None => {
                 self.inner.take();
                 Poll::Ready(None)
             }
