@@ -59,76 +59,11 @@ async fn main() {
 
 ## Use Cases
 
-### Dark Forwarding
-Clone the body to send it to a secondary destination for testing in production or shadow traffic analysis:
+Common scenarios where cloning HTTP bodies is useful:
 
-```rust
-use shared_http_body::SharedBody;
-
-async fn dark_forward(body: impl http_body::Body + Unpin) 
-where
-    <impl http_body::Body>::Data: Clone,
-    <impl http_body::Body>::Error: Clone,
-{
-    let shared = SharedBody::new(body);
-    let shadow = shared.clone();
-    
-    // Send to shadow/dark environment in background
-    tokio::spawn(async move {
-        send_to_shadow_env(shadow).await;
-    });
-    
-    // Forward to production handler
-    production_handler(shared).await;
-}
-```
-
-### Request Retries
-Keep a clone of the request body for retry attempts on failure:
-
-```rust
-async fn retry_request(body: impl http_body::Body + Unpin) 
-where
-    <impl http_body::Body>::Data: Clone,
-    <impl http_body::Body>::Error: Clone,
-{
-    let shared = SharedBody::new(body);
-    
-    for attempt in 1..=3 {
-        let body_clone = shared.clone();
-        match send_request(body_clone).await {
-            Ok(response) => return Ok(response),
-            Err(_) if attempt < 3 => continue,
-            Err(e) => return Err(e),
-        }
-    }
-}
-```
-
-### Request/Response Logging
-Clone the body to log it while still forwarding to the handler:
-
-```rust
-use shared_http_body::SharedBody;
-
-async fn log_and_forward(body: impl http_body::Body + Unpin) 
-where
-    <impl http_body::Body>::Data: Clone,
-    <impl http_body::Body>::Error: Clone,
-{
-    let shared = SharedBody::new(body);
-    let logger = shared.clone();
-    
-    // Log in background
-    tokio::spawn(async move {
-        let data = logger.collect().await.unwrap().to_bytes();
-        log::info!("Request body: {:?}", data);
-    });
-    
-    // Forward the original
-    forward_request(shared).await;
-}
-```
+- **Dark Forwarding** — Clone the body to send it to a secondary destination for testing in production or shadow traffic analysis.
+- **Request Retries** — Keep a clone of the request body for retry attempts on failure.
+- **Request/Response Logging** — Clone the body to log it while still forwarding to the handler.
 
 ## Requirements
 
