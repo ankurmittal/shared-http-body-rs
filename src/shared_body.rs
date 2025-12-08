@@ -439,26 +439,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_cross_thread_sharing() {
-        use std::sync::Arc;
         use tokio::task;
 
         let chunks = vec!["cross", "thread", "test"];
         let body = create_test_body(chunks);
-        let shared_body = Arc::new(SharedBody::new(body));
+        let shared_body = SharedBody::new(body);
 
         // Clone and move to different threads
-        let body1 = Arc::clone(&shared_body);
-        let body2 = Arc::clone(&shared_body);
+        let body1 = shared_body.clone();
+        let body2 = shared_body.clone();
 
-        let handle1 = task::spawn(async move {
-            let cloned = (*body1).clone();
-            cloned.collect().await.unwrap().to_bytes()
-        });
+        let handle1 = task::spawn(async move { body1.collect().await.unwrap().to_bytes() });
 
-        let handle2 = task::spawn(async move {
-            let cloned = (*body2).clone();
-            cloned.collect().await.unwrap().to_bytes()
-        });
+        let handle2 = task::spawn(async move { body2.collect().await.unwrap().to_bytes() });
 
         let (result1, result2) = tokio::join!(handle1, handle2);
         let expected = Bytes::from("crossthreadtest");
@@ -548,16 +541,14 @@ mod tests {
     #[tokio::test]
     async fn test_pending_future_behavior() {
         use std::pin::Pin;
-        use std::sync::{Arc, Mutex};
-        use std::task::{Context, Poll, Waker};
+        use std::task::{Context, Poll};
 
-        // Create a custom body that returns Pending once
+        // Create a custom body that returns Pending once.
         #[derive(Clone)]
         struct PendingOnceBody {
             data: Vec<Bytes>,
             index: usize,
-            has_returned_pending: Arc<Mutex<bool>>,
-            stored_waker: Arc<Mutex<Option<Waker>>>,
+            has_returned_pending: bool,
         }
 
         impl http_body::Body for PendingOnceBody {
@@ -569,17 +560,11 @@ mod tests {
                 cx: &mut Context<'_>,
             ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
                 let this = self.get_mut();
-                let mut has_returned_pending = this.has_returned_pending.lock().unwrap();
 
-                // Return Pending exactly once
-                if !*has_returned_pending {
-                    *has_returned_pending = true;
-                    *this.stored_waker.lock().unwrap() = Some(cx.waker().clone());
-
-                    // Immediately wake to continue
-                    let waker = cx.waker().clone();
-                    waker.wake();
-
+                // Return Pending exactly once, then wake to ensure a re-poll.
+                if !this.has_returned_pending {
+                    this.has_returned_pending = true;
+                    cx.waker().wake_by_ref();
                     return Poll::Pending;
                 }
 
@@ -597,8 +582,7 @@ mod tests {
         let pending_body = PendingOnceBody {
             data: vec![Bytes::from("test1"), Bytes::from("test2")],
             index: 0,
-            has_returned_pending: Arc::new(Mutex::new(false)),
-            stored_waker: Arc::new(Mutex::new(None)),
+            has_returned_pending: false,
         };
 
         let shared_body = SharedBody::new(pending_body);
