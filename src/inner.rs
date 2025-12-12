@@ -74,10 +74,9 @@ where
         };
 
         let item = ready!(body.poll_frame(cx));
-
+        let body = self.inner.take().unwrap();
         match item {
             Some(item) => {
-                let body = self.inner.take().unwrap();
                 let is_end_stream = body.is_end_stream();
                 let size_hint = body.size_hint();
                 let next_shared_future = InnerFuture::new(body).shared();
@@ -88,10 +87,7 @@ where
                     size_hint,
                 )))
             }
-            None => {
-                self.inner.take();
-                Poll::Ready(None)
-            }
+            None => Poll::Ready(None),
         }
     }
 }
