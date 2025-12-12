@@ -148,9 +148,6 @@ where
     /// let shared_body = SharedBody::new(body);
     /// ```
     ///
-    /// # Panics
-    ///
-    /// This method does not panic under normal circumstances.
     pub fn new(body: B) -> Self {
         let size_hint = body.size_hint();
         let is_end = body.is_end_stream();
