@@ -22,7 +22,7 @@ exclude = ["target/", ".git/", ".gitignore"]
 
 [dependencies]
 futures-util = "0.3"
-http-body = "1"
+http-body = "1.1"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "macros", "rt-multi-thread"] }

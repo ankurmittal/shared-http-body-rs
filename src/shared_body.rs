@@ -107,7 +107,7 @@ where
         let s = Self {
             future: self.future.clone(),
             is_end_stream: self.is_end_stream,
-            size_hint: self.size_hint.clone(),
+            size_hint: self.size_hint,
             #[cfg(feature = "stats")]
             stats: self.stats.clone(),
         };
@@ -243,7 +243,7 @@ where
     }
 
     fn size_hint(&self) -> SizeHint {
-        self.size_hint.clone()
+        self.size_hint
     }
 }
 
