@@ -48,32 +48,6 @@
 //! - Clones created after consumption will only see frames remaining from that body's position
 //! - Each clone can be consumed independently and can itself be cloned from its current position
 //!
-//! For example, with a body containing 4 frames:
-//! ```
-//! use shared_http_body::SharedBody;
-//! use http_body_util::{BodyExt, StreamBody};
-//! use http_body::Frame;
-//! use bytes::Bytes;
-//! use futures_util::stream;
-//!
-//! # tokio_test::block_on(async {
-//! let chunks = vec!["frame1", "frame2", "frame3", "frame4"];
-//! let stream = stream::iter(chunks.into_iter().map(|s| Ok::<_, std::convert::Infallible>(Frame::data(Bytes::from(s)))));
-//! let body = StreamBody::new(stream);
-//! let mut original = SharedBody::new(body);
-//!
-//! // Consume first frame
-//! use http_body::Body;
-//! let _ = std::pin::Pin::new(&mut original).poll_frame(&mut std::task::Context::from_waker(&futures_util::task::noop_waker()));
-//! // Or use the frame method from BodyExt
-//! let _ = http_body_util::BodyExt::frame(&mut original).await;
-//!
-//! // Clone after consuming 1 frame - clone1 will have 3 remaining frames
-//! let clone1 = original.clone();
-//!
-//! # });
-//! ```
-//!
 //! # Thread Safety
 //!
 //! `SharedBody` is both [`Send`] and [`Sync`] when the underlying body and its data/error types
