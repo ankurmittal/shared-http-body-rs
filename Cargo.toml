@@ -1,6 +1,6 @@
 [package]
 name = "shared_http_body"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2024"
 authors = ["Ankur Mittal"]
 license = "Apache-2.0"
@@ -10,6 +10,7 @@ repository = "https://github.com/ankurmittal/shared-http-body-rs"
 documentation = "https://docs.rs/shared_http_body"
 keywords = ["http", "body", "async", "clone", "shared"]
 categories = ["asynchronous", "web-programming"]
+exclude = ["/.github/", "codecov.yml"]
 
 [features]
 # Optional runtime stats (active clone counts). Disabled by default.
