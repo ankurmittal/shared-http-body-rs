@@ -1,7 +1,7 @@
 [package]
 name = "shared_http_body"
 version = "0.1.6"
-edition = "2021"
+edition = "2024"
 authors = ["Ankur Mittal"]
 license = "Apache-2.0"
 description = "A library for creating shareable HTTP bodies that can be cloned and consumed by multiple consumers"

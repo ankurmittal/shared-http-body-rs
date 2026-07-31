@@ -1,8 +1,8 @@
-use futures_util::{future::Shared, FutureExt};
+use futures_util::{FutureExt, future::Shared};
 use http_body::SizeHint;
 use std::future::Future;
 use std::pin::Pin;
-use std::task::{ready, Context, Poll};
+use std::task::{Context, Poll, ready};
 
 use crate::inner::{InnerFuture, IsEndStream};
 
