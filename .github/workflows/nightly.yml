@@ -1,0 +1,12 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: '17 9 * * *'
+  workflow_dispatch:
+
+jobs:
+  nightly:
+    uses: ./.github/workflows/rust.yml
+    with:
+      skip_coverage: true
