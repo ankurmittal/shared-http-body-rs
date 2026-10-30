@@ -1,6 +1,6 @@
 [package]
 name = "shared_http_body"
-version = "0.1.7"
+version = "0.1.8"
 edition = "2024"
 authors = ["Ankur Mittal"]
 license = "Apache-2.0"
