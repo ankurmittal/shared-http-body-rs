@@ -94,14 +94,24 @@
 //! - **Request Retries**: Keep a clone of the request body for retry attempts on failure
 //! - **Request/Response Logging**: Clone the body to log it while still forwarding to the handler
 //!
+//! # Forking only some requests
+//!
+//! Middleware often forks only some requests. Wrapping every request in
+//! [`SharedBody`] adds work on every frame, even for requests that are never
+//! forked. [`MaybeSharedBody`] holds either the original body or a
+//! [`SharedBody`], so the middleware can leave unforked requests untouched and
+//! still pass one body type to the next service.
+//!
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod clonable_frame;
 mod ext;
 mod inner;
+mod maybe_shared;
 mod shared_body;
 
+pub use crate::maybe_shared::MaybeSharedBody;
 pub use crate::shared_body::SharedBody;
 pub use ext::SharedBodyExt;
 
