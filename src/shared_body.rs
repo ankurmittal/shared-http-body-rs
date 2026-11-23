@@ -263,11 +263,17 @@ where
         // Each frame's link owns the next link.
         // Dropping a long chain at once would recurse once per frame and can overflow the stack.
         // Holding the next link while this one drops keeps each drop to one frame.
+        // `peek` panics on a link whose body panicked while producing it.
+        // That link has no next link, so the walk stops there instead of panicking in `drop`.
         let mut link = self.future.take();
         while let Some(current) = link {
-            link = current
-                .peek()
-                .and_then(|output| output.as_ref().map(|(_, next, _, _)| next.clone()));
+            link = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                current
+                    .peek()
+                    .and_then(|output| output.as_ref().map(|(_, next, _, _)| next.clone()))
+            }))
+            .ok()
+            .flatten();
         }
     }
 }
@@ -742,5 +748,37 @@ mod tests {
 
         first.join().expect("the thread did not panic");
         second.join().expect("the thread did not panic");
+    }
+
+    /// A body whose first poll panics.
+    fn panicking_body() -> StreamBody<
+        impl futures_util::Stream<Item = Result<Frame<Bytes>, std::convert::Infallible>> + Unpin,
+    > {
+        StreamBody::new(stream::poll_fn(|_| panic!("body panicked")))
+    }
+
+    #[test]
+    fn dropping_a_clone_after_the_body_panicked_does_not_panic() {
+        let body = SharedBody::new(panicking_body());
+        let other = body.clone();
+
+        let read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            tokio_test::block_on(body.collect())
+        }));
+
+        assert!(read.is_err());
+        drop(other);
+    }
+
+    #[test]
+    fn dropping_a_clone_while_the_body_panic_unwinds_does_not_abort() {
+        let body = SharedBody::new(panicking_body());
+
+        let read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _other = body.clone();
+            tokio_test::block_on(body.collect())
+        }));
+
+        assert!(read.is_err());
     }
 }
