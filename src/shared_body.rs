@@ -247,7 +247,6 @@ where
     }
 }
 
-#[cfg(feature = "stats")]
 impl<B> Drop for SharedBody<B>
 where
     B: http_body::Body + Unpin,
@@ -256,8 +255,25 @@ where
 {
     fn drop(&mut self) {
         // Decrement active-clone count when this handle is dropped.
+        #[cfg(feature = "stats")]
         if self.future.is_some() {
             self.stats.decrement();
+        }
+
+        // Each frame's link owns the next link.
+        // Dropping a long chain at once would recurse once per frame and can overflow the stack.
+        // Holding the next link while this one drops keeps each drop to one frame.
+        // `peek` panics on a link whose body panicked while producing it.
+        // That link has no next link, so the walk stops there instead of panicking in `drop`.
+        let mut link = self.future.take();
+        while let Some(current) = link {
+            link = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                current
+                    .peek()
+                    .and_then(|output| output.as_ref().map(|(_, next, _, _)| next.clone()))
+            }))
+            .ok()
+            .flatten();
         }
     }
 }
@@ -673,5 +689,96 @@ mod tests {
 
         let _ = shared2.collect().await.unwrap().to_bytes();
         assert_eq!(stats2.active_clones(), 0);
+    }
+
+    /// Runs `f` on a thread with a 256 KiB stack.
+    fn on_small_stack(f: impl FnOnce() + Send + 'static) {
+        std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(f)
+            .expect("spawns a thread")
+            .join()
+            .expect("the thread did not panic");
+    }
+
+    /// A body of `count` one-byte data frames.
+    fn one_byte_frames(
+        count: usize,
+    ) -> StreamBody<
+        impl futures_util::Stream<Item = Result<Frame<Bytes>, std::convert::Infallible>> + Unpin,
+    > {
+        StreamBody::new(stream::iter(
+            (0..count).map(|_| Ok(Frame::data(Bytes::from_static(b"x")))),
+        ))
+    }
+
+    #[test]
+    fn dropping_a_long_chain_does_not_overflow_the_stack() {
+        on_small_stack(|| {
+            let head = SharedBody::new(one_byte_frames(200_000));
+            let reader = head.clone();
+
+            let read = tokio_test::block_on(reader.collect()).expect("infallible");
+
+            assert_eq!(read.to_bytes().len(), 200_000);
+            drop(head);
+        });
+    }
+
+    #[test]
+    fn concurrent_drops_of_a_long_chain_do_not_overflow_the_stack() {
+        let head = SharedBody::new(one_byte_frames(200_000));
+        let reader = head.clone();
+        let read = tokio_test::block_on(reader.collect()).expect("infallible");
+        assert_eq!(read.to_bytes().len(), 200_000);
+
+        let other = head.clone();
+        let start = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let drop_after_start = |body: SharedBody<_>, start: std::sync::Arc<std::sync::Barrier>| {
+            std::thread::Builder::new()
+                .stack_size(256 * 1024)
+                .spawn(move || {
+                    start.wait();
+                    drop(body);
+                })
+                .expect("spawns a thread")
+        };
+        let first = drop_after_start(head, start.clone());
+        let second = drop_after_start(other, start);
+
+        first.join().expect("the thread did not panic");
+        second.join().expect("the thread did not panic");
+    }
+
+    /// A body whose first poll panics.
+    fn panicking_body() -> StreamBody<
+        impl futures_util::Stream<Item = Result<Frame<Bytes>, std::convert::Infallible>> + Unpin,
+    > {
+        StreamBody::new(stream::poll_fn(|_| panic!("body panicked")))
+    }
+
+    #[test]
+    fn dropping_a_clone_after_the_body_panicked_does_not_panic() {
+        let body = SharedBody::new(panicking_body());
+        let other = body.clone();
+
+        let read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            tokio_test::block_on(body.collect())
+        }));
+
+        assert!(read.is_err());
+        drop(other);
+    }
+
+    #[test]
+    fn dropping_a_clone_while_the_body_panic_unwinds_does_not_abort() {
+        let body = SharedBody::new(panicking_body());
+
+        let read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _other = body.clone();
+            tokio_test::block_on(body.collect())
+        }));
+
+        assert!(read.is_err());
     }
 }
